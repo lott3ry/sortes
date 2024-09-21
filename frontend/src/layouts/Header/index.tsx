@@ -31,7 +31,7 @@ const Header = () => {
               <Link to="/">
                 <img
                   src={sortesLogo}
-                  alt="Lott3ry"
+                  alt="Sortes"
                   className="h-[40px] w-[160px]"
                 />
               </Link>
@@ -79,7 +79,7 @@ const Header = () => {
             >
               <img
                 src={logoWithTitle}
-                alt="Lott3ry"
+                alt="Sortes"
                 className="h-[17px] w-[73px]"
               />
             </Link>

@@ -352,10 +352,10 @@ const PrizePoolChart: React.FC = () => {
             <div className="absolute -right-4 -top-3 size-[14px] max-sm:-right-3 max-sm:-top-2 max-sm:size-[10px]">
               <Tooltip type="info">
                 <span className="absolute bottom-[20px] left-2 z-40 w-[400px] rounded bg-[#F8F8F8] p-[10px] text-xs max-sm:w-[200px] max-sm:text-[8px]">
-                  {xTokenName} is minted by depositing wBTC into the Lott3ry
+                  {xTokenName} is minted by depositing wBTC into the Sortes
                   smart contract, with no other issuance methods. The value of{' '}
                   {xTokenName} is inherently linked to the size of the BTC pool
-                  on Lott3ry, dynamically fluctuating with users' lottery draws.{' '}
+                  on Sortes, dynamically fluctuating with users' lottery draws.{' '}
                   {xTokenName} serves as a record-keeping certificate for
                   depositing and withdrawing BTC from the prize pool.
                 </span>

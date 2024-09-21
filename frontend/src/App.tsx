@@ -14,7 +14,7 @@ import {
 import { useEffect, useMemo, useLayoutEffect } from 'react';
 import GlobalConfirm from './components/Modal/GlobalConfirm';
 import { once } from './utils/helper';
-import LogoImg from './assets/images/logo.png';
+import LogoImg from './assets/svg/lott/sortes-dark.svg';
 
 import { chainInfoMap, isMobileWeb } from './utils/env';
 import { CommonLayout } from './layouts/CommonLayout';
