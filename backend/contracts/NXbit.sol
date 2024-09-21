@@ -288,7 +288,188 @@ abstract contract NXbit is IXbit, ERC20, ERC20Burnable, VRFConsumerBaseV2Plus {
         uint8 usdType,
         uint256 swapId
     ) external override returns (uint256 requestId) {
-        // TODO: implement
+        require(amount >= 10 * USD_UNIT, "amount must be at least 10 USD");
+        require(
+            usdType == 0 || usdType == 1,
+            "usdType must be 0 (USDT) or 1 (USDC)"
+        );
+
+        // sent USD to the contract pool
+
+        // r to claimer, 10% - r to donation, rest to pool
+        Swap storage swap = swapId2SwapDetail[swapId];
+        require(
+            swap.millionth_ratio <= 8e4,
+            "millionth ratio must <= 8e4 (8%)"
+        );
+        uint256 amount_claimer = (amount * swap.millionth_ratio) / 1e6;
+        uint256 amount_donation = amount / 10 - amount_claimer;
+        uint256 amount_topool = amount - amount_claimer - amount_donation;
+
+        // transfer to donation
+        TransferHelper.safeTransferFrom(
+            usdType == 0 ? address(_usdt) : address(_usdc),
+            msg.sender,
+            MAINTAINER_ADDRESS,
+            amount_donation
+        );
+
+        // transfer claimer and pool
+        TransferHelper.safeTransferFrom(
+            usdType == 0 ? address(_usdt) : address(_usdc),
+            msg.sender,
+            address(this),
+            amount_claimer + amount_topool
+        );
+
+        // increase claimable fee
+        if (usdType == 0) {
+            claimableUsdtFee += amount_claimer;
+            address2RemainingUsdtFees[swap.owner] += amount_claimer;
+        } else {
+            claimableUsdcFee += amount_claimer;
+            address2RemainingUsdcFees[swap.owner] += amount_claimer;
+        }
+
+        amount_topool = amount_topool - fundSubscription(9 * USD_UNIT, usdType);
+        if (amount_topool > 0) {
+            convertUSD2JKPT(amount_topool, usdType);
+        }
+
+        requestId = preRandom(
+            amount,
+            amount_claimer,
+            amount_donation,
+            usdType,
+            swapId
+        );
+        simpleFulfillRandomness(requestId); // should do nothing if VRF is used
+    }
+
+    // === Reward functions ===
+
+    function rewardByRandom(
+        uint256 jkpt_ticket,
+        uint256 random_word,
+        uint256 swapId
+    )
+        private
+        view
+        returns (uint256 reward_level, uint256 reward_xexp, uint256 reward_jkpt)
+    {
+        uint256 p = random_word % RAND_MAX;
+        uint256 usdt_amount_pool = (this.getPrizePoolSizeInJKPT() *
+            10 *
+            USD_UNIT) / jkpt_ticket;
+
+        Swap storage swap = swapId2SwapDetail[swapId];
+        uint256 upper = 0;
+        uint256 xexp_amount = 100 * 10 ** _xexp.decimals();
+
+        for (uint256 i = 0; i < swap.relatives.length; ++i) {
+            uint256 reward_usdt = swap.relatives[i]
+                ? (swap.rewards[i] * usdt_amount_pool) / 1e6
+                : swap.rewards[i];
+
+            upper += (RAND_MAX / reward_usdt) * swap.expectations[i];
+
+            if (p < upper) {
+                reward_level = i;
+                reward_usdt = Math.min(reward_usdt, usdt_amount_pool / 10);
+                reward_jkpt = (reward_usdt * jkpt_ticket) / 10 / USD_UNIT;
+                reward_xexp = xexp_amount;
+
+                return (reward_level, reward_xexp, reward_jkpt);
+            }
+        }
+
+        return (swap.relatives.length, xexp_amount * 2, 0);
+    }
+
+    function simpleFulfillRandomness(uint256 requestId) internal virtual {}
+
+    function preRandom(
+        uint256 amount_usd,
+        uint256 swap_fee,
+        uint256 donation_fee,
+        uint8 usd_type,
+        uint256 swapId
+    ) internal returns (uint256 requestId) {
+        uint256 quantity = amount_usd / USD_UNIT / 10;
+
+        requestId = requestRandomWords();
+        requestIds.push(requestId);
+
+        address2RequestIds[msg.sender].push(requestId);
+        requestId2RequestStatus[requestId] = RequestStatus({
+            exists: true,
+            requestId: requestId,
+            player: msg.sender,
+            swapId: swapId,
+            usdIn: amount_usd,
+            usdType: usd_type, // 0 for USDT, 1 for USDC
+            jkptTicket: estimateUSD2JKPT(10 * USD_UNIT),
+            quantity: quantity,
+            // will be fulfilled after revealing
+            fulfilled: false, // TBD
+            randomWord: 0, // TBD
+            rewardLevels: new uint256[](0), // TBD
+            xexpOut: 0, // TBD
+            jkptOut: 0, // TBD
+            swapFee: swap_fee,
+            donation: donation_fee
+        });
+
+        emit RequestedRandomness(requestId, msg.sender);
+    }
+
+    function afterRandom(uint256 requestId, uint256 randomWord) internal {
+        RequestStatus storage status = requestId2RequestStatus[requestId];
+        require(status.exists, "invalid request");
+        require(!status.fulfilled, "already fulfilled");
+
+        uint256 amount_xexp = 0;
+        uint256 amount_jkpt = 0;
+        status.randomWord = randomWord;
+
+        for (uint i = 0; i < status.quantity; i++) {
+            uint256 reward_level = 0;
+            uint256 reward_xexp = 0;
+            uint256 reward_jkpt = 0;
+            (reward_level, reward_xexp, reward_jkpt) = rewardByRandom(
+                status.jkptTicket,
+                randomWord,
+                status.swapId
+            );
+            amount_xexp += reward_xexp;
+            amount_jkpt += reward_jkpt;
+            status.rewardLevels.push(reward_level);
+            randomWord = uint256(
+                keccak256(abi.encodePacked(randomWord, status.player))
+            );
+        }
+
+        status.xexpOut = amount_xexp;
+        status.jkptOut = amount_jkpt;
+        status.fulfilled = true;
+
+        reward(amount_xexp, amount_jkpt, status.player);
+
+        emit LotteryOutcome(requestId, status);
+    }
+
+    function reward(
+        uint256 amount_xexp,
+        uint256 amount_jkpt,
+        address receiver
+    ) internal {
+        if (amount_xexp > 0) {
+            _xexp.transfer(receiver, amount_xexp);
+        }
+
+        if (amount_jkpt > 0) {
+            _jkpt.transfer(receiver, amount_jkpt);
+        }
     }
 
     function getRequestIdsByAddress(
