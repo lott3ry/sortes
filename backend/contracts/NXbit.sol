@@ -32,6 +32,18 @@ abstract contract NXbit is IXbit, ERC20, ERC20Burnable, VRFConsumerBaseV2Plus {
     mapping(address => uint256[]) internal address2RequestIds;
     mapping(uint256 => RequestStatus) internal requestId2RequestStatus;
 
+    uint256[] internal swapIds;
+    uint256 internal nextSwapId = 1;
+    mapping(address => uint256[]) internal address2SwapIds;
+    mapping(uint256 => Swap) internal swapId2SwapDetail;
+
+    uint256 internal claimableUsdtFee = 0;
+    mapping(address => uint256) internal address2RemainingUsdtFees;
+    mapping(address => uint256) internal address2TotalUsdtFees;
+    uint256 internal claimableUsdcFee = 0;
+    mapping(address => uint256) internal address2RemainingUsdcFees;
+    mapping(address => uint256) internal address2TotalUsdcFees;
+
     // Chainlink variables
     AggregatorV3Interface internal immutable aggregator;
     uint256 internal subscriptionId;
@@ -126,7 +138,31 @@ abstract contract NXbit is IXbit, ERC20, ERC20Burnable, VRFConsumerBaseV2Plus {
     }
 
     function claimRemainingRewardFee() external override {
-        // TODO: implement
+        uint256 remainingUsdtFee = address2RemainingUsdtFees[msg.sender];
+        uint256 remainingUsdcFee = address2RemainingUsdcFees[msg.sender];
+        require(
+            remainingUsdtFee + remainingUsdcFee > 0,
+            "no remaining reward fees"
+        );
+
+        address2RemainingUsdtFees[msg.sender] = 0;
+        address2RemainingUsdcFees[msg.sender] = 0;
+        address2TotalUsdtFees[msg.sender] += remainingUsdtFee;
+        address2TotalUsdcFees[msg.sender] += remainingUsdcFee;
+        claimableUsdtFee -= remainingUsdtFee;
+        claimableUsdcFee -= remainingUsdcFee;
+        TransferHelper.safeTransfer(
+            address(_usdt),
+            msg.sender,
+            remainingUsdtFee
+        );
+        TransferHelper.safeTransfer(
+            address(_usdc),
+            msg.sender,
+            remainingUsdcFee
+        );
+
+        emit RewardFeeClaimed(msg.sender, remainingUsdtFee, remainingUsdcFee);
     }
 
     function getRemainingRewardFee()
@@ -135,7 +171,8 @@ abstract contract NXbit is IXbit, ERC20, ERC20Burnable, VRFConsumerBaseV2Plus {
         override
         returns (uint256 usdtFee, uint256 usdcFee)
     {
-        // TODO: implement
+        usdtFee = address2RemainingUsdtFees[msg.sender];
+        usdcFee = address2RemainingUsdcFees[msg.sender];
     }
 
     function getTotalRewardFee()
@@ -144,32 +181,106 @@ abstract contract NXbit is IXbit, ERC20, ERC20Burnable, VRFConsumerBaseV2Plus {
         override
         returns (uint256 usdtFee, uint256 usdcFee)
     {
-        // TODO: implement
+        usdtFee = address2TotalUsdtFees[msg.sender];
+        usdcFee = address2TotalUsdcFees[msg.sender];
     }
 
     // === Swap functions ===
     function registerSwap(
         Swap memory swap
     ) external override returns (uint256) {
-        // TODO: implement
+        require(
+            address2SwapIds[swap.owner].length < 100,
+            "too many swaps registered by the swap owner"
+        );
+
+        swap.id = nextSwapId;
+        nextSwapId += 1;
+
+        verifySwap(swap);
+        swapIds.push(swap.id);
+        address2SwapIds[swap.owner].push(swap.id);
+        swapId2SwapDetail[swap.id] = swap;
+
+        emit SwapRegistered(swap.id, swap.owner);
+        return swap.id;
+    }
+
+    function verifySwap(Swap memory swap) private view {
+        require(swap.relatives.length > 0, "must have at least one branch");
+        require(swap.relatives.length <= 10, "too many branches (> 10)");
+        require(
+            swap.relatives.length == swap.expectations.length &&
+                swap.relatives.length == swap.rewards.length,
+            "relatives, expectations, rewards must have equal lengths"
+        );
+        require(
+            swap.millionth_ratio <= 8e4,
+            "millionth ratio must <= 8e4 (8%)"
+        );
+
+        // calculate pool size
+        uint256 jkpt_ticket = estimateUSD2JKPT(10 * USD_UNIT);
+
+        uint256 jkpt_amount_pool = this.getPrizePoolSizeInJKPT();
+        uint256 usdt_amount_pool = (jkpt_amount_pool * 10 * USD_UNIT) /
+            jkpt_ticket;
+
+        uint256 expection_sum = 0;
+        uint256 prob_sum = 0;
+        uint256 reward_usdt = 0;
+        for (uint256 i = 0; i < swap.relatives.length; ++i) {
+            expection_sum += swap.expectations[i];
+            require(expection_sum <= 8 * USD_UNIT, "expectation too large");
+            if (swap.relatives[i]) {
+                require(
+                    swap.rewards[i] <= 1e5,
+                    "relative reward must be less than 1e5 (10% of pool)"
+                );
+                require(
+                    swap.rewards[i] > 0,
+                    "relative reward must be more than 0"
+                );
+            } else {
+                require(
+                    swap.rewards[i] <= usdt_amount_pool / 10,
+                    "absolute reward must be less than 10% of pool"
+                );
+                require(
+                    swap.rewards[i] >= USD_UNIT / 100,
+                    "absolute reward must be more than 0.01 USDT"
+                );
+            }
+            reward_usdt = swap.relatives[i]
+                ? (swap.rewards[i] * usdt_amount_pool) / 1e6
+                : swap.rewards[i];
+            prob_sum += (swap.expectations[i] * 1e6) / reward_usdt;
+        }
+
+        require(prob_sum <= 1e6, "probability sum too large");
     }
 
     function getSwap(
         uint256 swapId
     ) external view override returns (Swap memory) {
-        // TODO: implement
+        return swapId2SwapDetail[swapId];
     }
 
     function listSwapIds(
         address owner
     ) external view override returns (uint256[] memory) {
-        // TODO: implement
+        return address2SwapIds[owner];
     }
 
     function listSwaps(
         address owner
     ) external view override returns (Swap[] memory) {
-        // TODO: implement
+        uint256[] memory ownerSwapIds = address2SwapIds[owner];
+        Swap[] memory swaps = new Swap[](ownerSwapIds.length);
+        for (uint256 i = 0; i < ownerSwapIds.length; ++i) {
+            swaps[i] = swapId2SwapDetail[ownerSwapIds[i]];
+        }
+        return swaps;
     }
 
     function playSwap(
