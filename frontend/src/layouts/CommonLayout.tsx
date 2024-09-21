@@ -6,6 +6,7 @@ import MinerPage from '../pages/Miner';
 import { Route, Routes } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
+import { CharityPage } from '../pages/Charity';
 
 export const CommonLayout = () => {
   return (
@@ -17,8 +18,9 @@ export const CommonLayout = () => {
           <Route path="create-distributor-pool" element={<DistributorPage />} />
           <Route path="pool" element={<MinerPage />} />
           <Route path="miner" element={<MinerPage />} />
-          <Route path="lott3ry" element={<Lott3ryPage />} />
+          <Route path="play" element={<Lott3ryPage />} />
           <Route path="distributor-profit" element={<AssetPage />} />
+          <Route path="charity" element={<CharityPage />} />
           <Route path="/" element={<MinerPage />} />
         </Routes>
       </main>
