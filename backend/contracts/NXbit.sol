@@ -303,12 +303,157 @@ abstract contract NXbit is IXbit, ERC20, ERC20Burnable, VRFConsumerBaseV2Plus {
         return requestId2RequestStatus[requestId];
     }
 
+    function convertUSD2JKPT(
+        uint amountIn,
+        uint8 usdType
+    ) internal returns (uint amountOut) {
+        if (usdType == 0) {
+            return convertUSDT2JKPT(amountIn);
+        } else {
+            return convertUSDC2JKPT(amountIn);
+        }
+    }
+
+    function convertUSDT2JKPT(
+        uint amountIn
+    ) internal virtual returns (uint amountOut) {
+        // Approve the router to spend usdt.
+        TransferHelper.safeApprove(
+            address(_usdt),
+            address(swapRouter02),
+            amountIn
+        );
+
+        IV3SwapRouter.ExactInputParams memory params = IV3SwapRouter
+            .ExactInputParams({
+                path: abi.encodePacked(
+                    address(_usdt),
+                    poolFee500mu,
+                    address(_weth),
+                    poolFee500mu,
+                    address(_jkpt)
+                ),
+                recipient: address(this),
+                amountIn: amountIn,
+                amountOutMinimum: (estimateUSD2JKPT(amountIn) * 3) / 4 // amountMin
+            });
+
+        // Executes the swap.
+        amountOut = swapRouter02.exactInput(params);
+    }
+
+    function convertUSDC2JKPT(
+        uint amountIn
+    ) internal virtual returns (uint amountOut) {
+        // Approve the router to spend usdc.
+        TransferHelper.safeApprove(
+            address(_usdc),
+            address(swapRouter02),
+            amountIn
+        );
+
+        IV3SwapRouter.ExactInputParams memory params = IV3SwapRouter
+            .ExactInputParams({
+                path: abi.encodePacked(
+                    address(_usdc),
+                    poolFee500mu,
+                    address(_jkpt)
+                ),
+                recipient: address(this),
+                amountIn: amountIn,
+                amountOutMinimum: (estimateUSD2JKPT(amountIn) * 3) / 4 // amountMin
+            });
+
+        // Executes the swap.
+        amountOut = swapRouter02.exactInput(params);
+    }
+
+    function convertUSD2LINK(
+        uint amountIn,
+        uint8 usdType
+    ) internal returns (uint amountOut) {
+        address address_usd = usdType == 0 ? address(_usdt) : address(_usdc);
+        // Approve the router to spend.
+        TransferHelper.safeApprove(
+            address_usd,
+            address(swapRouter02),
+            amountIn
+        );
+
+        IV3SwapRouter.ExactInputParams memory params = IV3SwapRouter
+            .ExactInputParams({
+                path: abi.encodePacked(
+                    address_usd,
+                    poolFee500mu,
+                    address(_weth),
+                    poolFee3000mu,
+                    address(_link)
+                ),
+                recipient: address(this),
+                amountIn: amountIn,
+                amountOutMinimum: 0
+            });
+
+        // Executes the swap.
+        amountOut = swapRouter02.exactInput(params);
+    }
+
+    function convertUSD2WETH(
+        uint amountIn,
+        uint8 usdType
+    ) internal returns (uint amountOut) {
+        address address_usd = usdType == 0 ? address(_usdt) : address(_usdc);
+        // Approve the router to spend.
+        TransferHelper.safeApprove(
+            address_usd,
+            address(swapRouter02),
+            amountIn
+        );
+
+        IV3SwapRouter.ExactInputParams memory params = IV3SwapRouter
+            .ExactInputParams({
+                path: abi.encodePacked(
+                    address_usd,
+                    poolFee500mu,
+                    address(_weth)
+                ),
+                recipient: address(this),
+                amountIn: amountIn,
+                amountOutMinimum: 0
+            });
+
+        // Executes the swap.
+        amountOut = swapRouter02.exactInput(params);
+    }
+
+    function estimateUSD2JKPT(
+        uint amountIn
+    ) public view virtual returns (uint) {
+        // prettier-ignore
+        (
+            /* uint80 roundID */,
+            int256 answer,
+            /*uint startedAt*/,
+            /*uint timeStamp*/,
+            /*uint80 answeredInRound*/
+        ) = aggregator.latestRoundData();
+        return
+            (amountIn *
+                10 **
+                    (aggregator.decimals() + _jkpt.decimals() - USD_DECIMALS)) /
+            uint256(answer);
+    }
+
     function getPrizePoolSizeInJKPT() external view override returns (uint256) {
         return _jkpt.balanceOf(address(this));
     }
 
     function getPrizePoolSizeInUSD() external view override returns (uint256) {
-        // TODO: implement
+        uint256 jkpt_ticket = estimateUSD2JKPT(10 * USD_UNIT);
+        uint256 jkpt_amount_pool = this.getPrizePoolSizeInJKPT();
+        uint256 usdt_amount_pool = (jkpt_amount_pool * 10 * USD_UNIT) /
+            jkpt_ticket;
+        return usdt_amount_pool;
     }
 
     // === VRF functions ===
