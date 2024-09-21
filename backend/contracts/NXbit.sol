@@ -464,29 +464,62 @@ abstract contract NXbit is IXbit, ERC20, ERC20Burnable, VRFConsumerBaseV2Plus {
         uint32 _callbackGasLimit,
         uint256 _linkThreshold
     ) public {
-        // TODO: implement
+        require(
+            msg.sender == MAINTAINER_ADDRESS || msg.sender == owner(),
+            "only maintainer or owner can set Chainlink subscription"
+        );
+        subscriptionId = _subscriptionId;
+        keyHash = _keyHash;
+        callbackGasLimit = _callbackGasLimit;
+        linkThreshold = _linkThreshold;
     }
 
     function fundChainlinkSubscription(uint256 amount) internal {
-        // TODO: implement
+        _link.transferAndCall(
+            address(s_vrfCoordinator),
+            amount,
+            abi.encode(subscriptionId)
+        );
     }
 
     function fundSubscription(
         uint256 usd_amount,
         uint8 usdType
     ) internal returns (uint256) {
-        // TODO: implement
+        uint96 balance;
+        (balance, , , , ) = s_vrfCoordinator.getSubscription(subscriptionId);
+
+        // fund subscription if balance is less than linkThreshold
+        if (balance < linkThreshold) {
+            uint256 amount_link = convertUSD2LINK(usd_amount, usdType);
+            fundChainlinkSubscription(amount_link);
+            return usd_amount;
+        }
+        return 0;
     }
 
     function requestRandomWords() internal returns (uint256) {
-        // TODO: implement
+        return
+            s_vrfCoordinator.requestRandomWords(
+                VRFV2PlusClient.RandomWordsRequest({
+                    keyHash: keyHash,
+                    subId: subscriptionId,
+                    requestConfirmations: requestConfirmations,
+                    callbackGasLimit: callbackGasLimit,
+                    numWords: numWords,
+                    extraArgs: VRFV2PlusClient._argsToBytes(
+                        // Set nativePayment to true to pay for VRF requests with Sepolia ETH instead of LINK
+                        VRFV2PlusClient.ExtraArgsV1({nativePayment: false})
+                    )
+                })
+            );
     }
 
     function fulfillRandomWords(
         uint256 requestId,
         uint256[] calldata randomWords
     ) internal override {
-        // TODO: implement
+        afterRandom(requestId, randomWords[0]);
     }
 
     receive() external payable {}
