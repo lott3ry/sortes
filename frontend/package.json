@@ -4,12 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev:app": "vite --config vite.config.app.ts --mode development",
-    "dev:home": "vite --config vite.config.home.ts --mode development",
-    "build:app": "vite build --config vite.config.app.ts",
-    "build:home": "vite build --config vite.config.home.ts",
-    "build:dev": "vite build --config vite.config.dev.ts",
-    "build": "npm run build:app && npm run build:home && npm run build:dev",
+    "dev": "vite --config vite.config.app.ts --mode development",
+    "build": "vite build --config vite.config.app.ts",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "prepare": "husky install"
